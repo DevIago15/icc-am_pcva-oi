@@ -3,9 +3,7 @@ pandas
 matplotlib
 seaborn
 scikit-learn
+joblib
 xgboost
 lightgbm
 tsplib95
-tqdm
-pathlib
-time

@@ -1,0 +1,16 @@
+feature,importance
+generation,1782
+relative_gap_to_best,1334
+normalized_cost,1131
+max_edge_cost,1127
+mean_edge_cost,988
+individual_cost,967
+std_cost,800
+worst_cost,689
+mean_cost,652
+stagnation,627
+best_cost,571
+individual_rank,570
+unique_edges_ratio,559
+instance_size,113
+age,90

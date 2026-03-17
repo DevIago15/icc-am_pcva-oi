@@ -1,0 +1,17 @@
+[
+  "generation",
+  "individual_rank",
+  "individual_cost",
+  "best_cost",
+  "worst_cost",
+  "mean_cost",
+  "std_cost",
+  "normalized_cost",
+  "relative_gap_to_best",
+  "age",
+  "stagnation",
+  "unique_edges_ratio",
+  "mean_edge_cost",
+  "max_edge_cost",
+  "instance_size"
+]

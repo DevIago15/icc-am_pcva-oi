@@ -1,0 +1,16 @@
+feature,importance
+relative_gap_to_best,0.7056163
+individual_rank,0.1251847
+normalized_cost,0.048018668
+age,0.023235522
+generation,0.021010885
+stagnation,0.018971195
+instance_size,0.00899736
+unique_edges_ratio,0.008429219
+std_cost,0.0076723783
+mean_cost,0.0058620004
+best_cost,0.005535396
+mean_edge_cost,0.005533068
+worst_cost,0.0054719774
+max_edge_cost,0.0052965074
+individual_cost,0.005164965

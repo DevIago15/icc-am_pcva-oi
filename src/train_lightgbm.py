@@ -3,6 +3,8 @@ from pathlib import Path
 
 import joblib
 import lightgbm as lgb
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 from sklearn.metrics import (

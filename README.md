@@ -2,7 +2,7 @@
 
 Projeto experimental de Algoritmo Memetico para o Problema do Caixeiro Viajante (PCV / TSP), com uma trilha complementar de Machine Learning para decidir quando aplicar busca local.
 
-O estado atual do projeto e o benchmark mais recente indicam que a base sem ML deve ser mantida como referencia principal. As policies com XGBoost e LightGBM continuam no repositorio como linha experimental, mas nao como nova base do solver.
+O estado atual do projeto e o benchmark mais recente indicam que a base sem ML deve ser mantida como referencia principal. As policies com XGBoost e LightGBM continuam no repositorio como linha experimental, mas nao como nova base do solver. A partir dessa base unica, o projeto agora tambem possui uma trilha hibrida com Grover, preparada para comparacoes futuras entre execucao classica e quantica.
 
 ## Visao geral
 
@@ -12,9 +12,11 @@ O projeto implementa:
 - crossover `OX1`
 - mutacao `ISM`
 - busca local `2-opt`
+- busca local hibrida `grover_2opt`
 - coleta de decisoes durante a execucao
 - treino de policies com `XGBoost` e `LightGBM`
 - benchmark comparativo entre solver base e variantes com ML
+- benchmark dedicado para comparar `2-opt` classico com a versao hibrida baseada em Grover
 
 A pergunta central do trabalho foi:
 
@@ -32,7 +34,7 @@ Motivos:
 - as variantes `efficiency` reduziram tempo, mas perderam qualidade demais
 - antes da etapa com modulo quantico, faz mais sentido consolidar uma unica base classica confiavel
 
-Em outras palavras: o ML foi util como investigacao cientifica, mas nao se mostrou vantajoso o suficiente para substituir a base classica.
+Em outras palavras: o ML foi util como investigacao cientifica, mas nao se mostrou vantajoso o suficiente para substituir a base classica. Por isso, a extensao com Grover foi acoplada diretamente ao solver base, e nao a uma variante com ML.
 
 ## Resultado do benchmark corrigido
 
@@ -67,6 +69,8 @@ pcv_memetic_ml/
 |-- artifacts/
 |   |-- benchmark_results_detailed.csv
 |   |-- benchmark_results_summary.csv
+|   |-- benchmark_grover_detailed.csv
+|   |-- benchmark_grover_summary.csv
 |   |-- efficiency_target_summary.json
 |   |-- lightgbm_feature_columns.json
 |   |-- lightgbm_improved_model.joblib
@@ -86,10 +90,12 @@ pcv_memetic_ml/
 |   |-- decision_dataset_efficiency.csv
 |-- src/
 |   |-- am_pcva_oi_base.py
+|   |-- am_pcva_oi_grover.py
 |   |-- am_pcva_oi_lightgbm.py
 |   |-- am_pcva_oi_lightgbm_efficiency.py
 |   |-- am_pcva_oi_xgboost.py
 |   |-- am_pcva_oi_xgboost_efficiency.py
+|   |-- benchmark_grover_backends.py
 |   |-- benchmark_policies.py
 |   |-- generate_dataset.py
 |   |-- prepare_efficiency_dataset.py
@@ -114,8 +120,10 @@ Esse arquivo concentra:
 - a inicializacao da populacao
 - os operadores geneticos
 - a busca local
+- o modo hibrido `grover_2opt`
 - a coleta de decisoes
 - as policies genericas
+- os backends de busca Grover
 
 Os arquivos abaixo sao apenas wrappers de policy sobre o mesmo nucleo:
 
@@ -125,6 +133,35 @@ Os arquivos abaixo sao apenas wrappers de policy sobre o mesmo nucleo:
 - [src/am_pcva_oi_lightgbm_efficiency.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_lightgbm_efficiency.py)
 
 Isso foi feito para evitar drift entre implementacoes e preparar o projeto para a futura extensao com modulo quantico.
+
+## Trilha hibrida com Grover
+
+O projeto agora inclui uma extensao hibrida do solver base usando Grover como subrotina de busca sobre um conjunto de movimentos candidatos de `2-opt`.
+
+Ideia geral:
+
+- o solver continua sendo o `AMPCVAOI` compartilhado
+- a busca local pode operar no modo tradicional `2opt`
+- ou no modo `grover_2opt`
+- no modo hibrido, o solver monta um pool de movimentos `2-opt` candidatos
+- um backend Grover escolhe um movimento melhorante dentro desse pool
+
+Backends atualmente suportados:
+
+- `ClassicalGroverSearchBackend`
+- `QiskitGroverSearchBackend`
+
+Objetivo dessa trilha:
+
+- manter uma unica base classica confiavel
+- desenvolver a versao hibrida sobre o mesmo nucleo do solver
+- permitir comparacao futura entre execucao em ambiente classico e ambiente quantico
+
+No estado atual:
+
+- o backend classico ja esta funcional
+- o backend Qiskit e opcional e depende da instalacao das bibliotecas quanticas
+- a comparacao com hardware quantico real fica preparada como proximo passo, nao como etapa concluida
 
 ## Pipeline experimental
 
@@ -145,7 +182,11 @@ Fluxo atual:
    ->
 7. Rodar benchmark comparativo
    ->
-8. Decidir qual abordagem deve seguir como base
+8. Consolidar o solver base como linha principal
+   ->
+9. Estender essa base para a versao hibrida com Grover
+   ->
+10. Comparar execucao classica e quantica no futuro
 ```
 
 ## Datasets e targets
@@ -245,6 +286,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Observacao:
+
+- `qiskit` e `qiskit-algorithms` sao dependencias da trilha Grover
+- se voce quiser trabalhar apenas com a parte classica, a base do solver continua utilizavel sem acionar o backend quantico
+
 ### 3. Gerar dataset base
 
 ```bash
@@ -279,11 +325,27 @@ python src/train_lightgbm_efficiency.py
 python src/benchmark_policies.py
 ```
 
+### 8. Rodar a versao hibrida com Grover
+
+```bash
+python src/am_pcva_oi_grover.py
+```
+
+### 9. Rodar benchmark da trilha Grover
+
+```bash
+python src/benchmark_grover_backends.py
+```
+
 ## O que cada script faz
 
 ### `src/am_pcva_oi_base.py`
 
-Nucleo compartilhado do solver. Quando executado diretamente, gera um dataset inicial de decisoes usando policy exploratoria.
+Nucleo compartilhado do solver. Quando executado diretamente, gera um dataset inicial de decisoes usando policy exploratoria. Tambem concentra a extensao hibrida `grover_2opt` e os backends de busca Grover.
+
+### `src/am_pcva_oi_grover.py`
+
+Executa a versao hibrida do solver base com `local_search_mode="grover_2opt"`.
 
 ### `src/generate_dataset.py`
 
@@ -345,6 +407,23 @@ E registra, alem de custo e tempo:
 - total de melhorias obtidas por busca local
 - tempo total gasto em busca local
 
+### `src/benchmark_grover_backends.py`
+
+Executa benchmark especifico entre:
+
+- `am_pcva_oi_base_2opt`
+- `am_pcva_oi_grover_classical`
+- `am_pcva_oi_grover_qiskit_statevector` quando `qiskit` estiver disponivel
+
+E registra:
+
+- custo final
+- tempo total
+- numero de chamadas ao backend Grover
+- numero de sucessos do backend Grover
+- tamanho medio do pool de candidatos
+- tempo total e medio do backend Grover
+
 ## Escolha da base sem ML
 
 A escolha atual do projeto e seguir com o solver base sem ML por tres razoes centrais:
@@ -358,6 +437,7 @@ Isso significa que:
 - o solver base e a referencia principal do projeto
 - as policies de ML permanecem como trilha secundaria de pesquisa
 - qualquer futura extensao quantica deve partir do nucleo compartilhado em `src/am_pcva_oi_base.py`
+- a versao com Grover e uma extensao direta da base oficial, e nao uma nova base paralela
 
 ## Estado atual do projeto
 
@@ -366,17 +446,21 @@ Neste momento, o projeto esta concentrado em:
 - consolidar a base classica do algoritmo memetico
 - manter a trilha de ML como linha experimental
 - preparar o codigo para uma proxima etapa com modulo quantico
+- estruturar uma versao hibrida com Grover sobre a base classica
 
 Ainda nao fazem parte da implementacao atual:
 
-- integracao com modulos quanticos
-- aceleracao quantica do solver
-- pipeline classico-quantico final
+- execucao em hardware quantico real
+- avaliacao experimental completa entre backend classico e backend quantico real
+- pipeline classico-quantico final consolidado
 
 ## Proximos passos
 
 - manter o solver base como baseline oficial
 - usar a base compartilhada como ponto de extensao para o modulo quantico
+- amadurecer a trilha `grover_2opt`
+- instalar e validar o backend Qiskit no ambiente
+- comparar `grover_2opt` com backend classico versus backend quantico
 - testar instancias reais da TSPLIB
 - revisar se alguma policy de ML ainda pode ser aproveitada como heuristica auxiliar, sem substituir a base
 

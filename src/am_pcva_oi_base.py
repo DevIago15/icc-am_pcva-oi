@@ -47,6 +47,13 @@ class DecisionRecord:
     local_search_time_ms: float
 
 
+@dataclass(frozen=True)
+class TwoOptMove:
+    i: int
+    j: int
+    improvement: float
+
+
 @dataclass
 class AMPCVAOIConfig:
     population_size: int = 10
@@ -61,6 +68,9 @@ class AMPCVAOIConfig:
     local_search_on_children: bool = True
     two_opt_first_improvement: bool = True
     two_opt_max_passes: int = 20
+    grover_candidate_pool_size: int = 64
+    grover_shots: int = 1024
+    grover_iterations: Optional[int] = None
     stagnation_limit: int = 60
     time_limit_seconds: Optional[float] = None
 
@@ -151,22 +161,137 @@ class ThresholdPolicy(LocalSearchPolicy):
         return float(self.score_fn(features)) >= self.threshold
 
 
+class GroverSearchBackend:
+    name: str = "grover"
+
+    def find_improving_move_index(
+        self,
+        improvements: Sequence[float],
+        rng: random.Random,
+        shots: int = 1024,
+        iterations: Optional[int] = None,
+    ) -> Optional[int]:
+        raise NotImplementedError
+
+
+class ClassicalGroverSearchBackend(GroverSearchBackend):
+    name = "classical"
+
+    def find_improving_move_index(
+        self,
+        improvements: Sequence[float],
+        rng: random.Random,
+        shots: int = 1024,
+        iterations: Optional[int] = None,
+    ) -> Optional[int]:
+        improving_indices = [idx for idx, value in enumerate(improvements) if value > 1e-12]
+        if not improving_indices:
+            return None
+        return rng.choice(improving_indices)
+
+
+class QiskitGroverSearchBackend(GroverSearchBackend):
+    name = "qiskit"
+
+    def __init__(self, sampler=None):
+        self.sampler = sampler
+
+    def find_improving_move_index(
+        self,
+        improvements: Sequence[float],
+        rng: random.Random,
+        shots: int = 1024,
+        iterations: Optional[int] = None,
+    ) -> Optional[int]:
+        improving_indices = [idx for idx, value in enumerate(improvements) if value > 1e-12]
+        if not improving_indices:
+            return None
+
+        try:
+            from qiskit import QuantumCircuit
+            from qiskit.primitives import StatevectorSampler
+            from qiskit_algorithms import AmplificationProblem, Grover
+        except Exception as exc:  # pragma: no cover
+            raise ImportError(
+                "Qiskit, qiskit-algorithms e qiskit.primitives sao necessarios para o backend Grover."
+            ) from exc
+
+        num_items = len(improvements)
+        num_qubits = max(1, math.ceil(math.log2(max(num_items, 2))))
+        good_states = [format(idx, f"0{num_qubits}b") for idx in improving_indices]
+
+        oracle = self._build_phase_oracle(QuantumCircuit, good_states, num_qubits)
+        problem = AmplificationProblem(oracle, is_good_state=good_states)
+
+        if iterations is None:
+            iterations = Grover.optimal_num_iterations(
+                num_solutions=len(good_states),
+                num_qubits=num_qubits,
+            )
+
+        sampler = self.sampler or StatevectorSampler(seed=rng.randint(0, 2**32 - 1))
+        grover = Grover(iterations=iterations, sampler=sampler)
+        result = grover.amplify(problem)
+
+        if not result.oracle_evaluation:
+            return None
+
+        top_measurement = getattr(result, "top_measurement", None)
+        if top_measurement is None:
+            return None
+
+        move_index = int(str(top_measurement), 2)
+        if move_index >= num_items or move_index not in improving_indices:
+            return None
+
+        return move_index
+
+    @staticmethod
+    def _build_phase_oracle(QuantumCircuit, good_states: Sequence[str], num_qubits: int):
+        oracle = QuantumCircuit(num_qubits)
+        target_qubit = num_qubits - 1
+        control_qubits = list(range(num_qubits - 1))
+
+        for state in good_states:
+            reversed_state = state[::-1]
+            zero_positions = [idx for idx, bit in enumerate(reversed_state) if bit == "0"]
+
+            for qubit in zero_positions:
+                oracle.x(qubit)
+
+            if num_qubits == 1:
+                oracle.z(0)
+            else:
+                oracle.h(target_qubit)
+                oracle.mcx(control_qubits, target_qubit)
+                oracle.h(target_qubit)
+
+            for qubit in reversed(zero_positions):
+                oracle.x(qubit)
+
+        return oracle
+
+
 class AMPCVAOI:
     def __init__(
         self,
         dist: DistanceMatrix,
         config: Optional[AMPCVAOIConfig] = None,
         policy: Optional[LocalSearchPolicy] = None,
+        grover_backend: Optional[GroverSearchBackend] = None,
         collect_decisions: bool = False,
     ):
         self.dist = dist
         self.cfg = config or AMPCVAOIConfig()
         self.rng = random.Random(self.cfg.seed)
         self.policy = policy
+        self.grover_backend = grover_backend or ClassicalGroverSearchBackend()
         self.collect_decisions = collect_decisions
         self.decision_records: List[DecisionRecord] = []
+        self.grover_stats = self._new_grover_stats()
 
     def run(self) -> Individual:
+        self.grover_stats = self._new_grover_stats()
         population = self._initialize_population()
         population.sort(key=lambda ind: ind.cost)
         best = self._clone_individual(population[0])
@@ -365,7 +490,66 @@ class AMPCVAOI:
             return self._clone_individual(individual)
         if mode == "2opt":
             return self._two_opt(individual)
+        if mode == "grover_2opt":
+            return self._grover_two_opt(individual)
         raise ValueError(f"Unsupported local_search_mode: {self.cfg.local_search_mode}")
+
+    def _grover_two_opt(self, individual: Individual) -> Individual:
+        best_tour = list(individual.tour)
+        best_cost = individual.cost
+        n = len(best_tour)
+        passes = 0
+
+        improved = True
+        while improved and passes < self.cfg.two_opt_max_passes:
+            improved = False
+            passes += 1
+
+            moves = self._ranked_two_opt_moves(best_tour)
+            if not moves:
+                break
+
+            if self.cfg.grover_candidate_pool_size > 0:
+                candidate_moves = moves[: self.cfg.grover_candidate_pool_size]
+            else:
+                candidate_moves = moves
+
+            improvements = [move.improvement for move in candidate_moves]
+
+            self.grover_stats["calls"] += 1
+            self.grover_stats["candidate_pool_total"] += len(candidate_moves)
+
+            t0 = time.perf_counter()
+            move_index = self.grover_backend.find_improving_move_index(
+                improvements,
+                rng=self.rng,
+                shots=self.cfg.grover_shots,
+                iterations=self.cfg.grover_iterations,
+            )
+            self.grover_stats["total_backend_time_ms"] += (time.perf_counter() - t0) * 1000.0
+
+            if move_index is None:
+                continue
+
+            move = candidate_moves[move_index]
+            if move.improvement <= 1e-12:
+                continue
+
+            best_tour = self._apply_two_opt_move(best_tour, move.i, move.j)
+            best_cost -= move.improvement
+            self.grover_stats["successes"] += 1
+            self.grover_stats["total_improvement"] += move.improvement
+            improved = True
+
+            if self.cfg.two_opt_first_improvement:
+                continue
+
+        return Individual(
+            tour=best_tour,
+            cost=best_cost,
+            generations_without_improvement=individual.generations_without_improvement,
+            age=individual.age,
+        )
 
     def _two_opt(self, individual: Individual) -> Individual:
         best_tour = list(individual.tour)
@@ -397,6 +581,35 @@ class AMPCVAOI:
             generations_without_improvement=individual.generations_without_improvement,
             age=individual.age,
         )
+
+    def _ranked_two_opt_moves(self, tour: Sequence[int]) -> List[TwoOptMove]:
+        n = len(tour)
+        moves: List[TwoOptMove] = []
+
+        for i in range(1, n - 2):
+            for j in range(i + 1, n):
+                if j - i == 1:
+                    continue
+
+                improvement = self._two_opt_improvement(tour, i, j)
+                moves.append(TwoOptMove(i=i, j=j, improvement=improvement))
+
+        moves.sort(key=lambda move: move.improvement, reverse=True)
+        return moves
+
+    def _two_opt_improvement(self, tour: Sequence[int], i: int, j: int) -> float:
+        n = len(tour)
+        a = tour[i - 1]
+        b = tour[i]
+        c = tour[j - 1]
+        d = tour[j % n]
+        current_cost = self.dist.d(a, b) + self.dist.d(c, d)
+        candidate_cost = self.dist.d(a, c) + self.dist.d(b, d)
+        return current_cost - candidate_cost
+
+    @staticmethod
+    def _apply_two_opt_move(tour: Sequence[int], i: int, j: int) -> Tour:
+        return list(tour[:i]) + list(reversed(tour[i:j])) + list(tour[j:])
 
     def _extract_features(
         self,
@@ -480,6 +693,29 @@ class AMPCVAOI:
             generations_without_improvement=int(ind.generations_without_improvement),
             age=int(ind.age),
         )
+
+    @staticmethod
+    def _new_grover_stats() -> dict:
+        return {
+            "backend": "",
+            "calls": 0,
+            "successes": 0,
+            "candidate_pool_total": 0,
+            "total_backend_time_ms": 0.0,
+            "total_improvement": 0.0,
+        }
+
+    def get_grover_stats(self) -> dict:
+        stats = dict(self.grover_stats)
+        stats["backend"] = getattr(self.grover_backend, "name", "unknown")
+        calls = stats["calls"]
+        stats["mean_candidate_pool_size"] = (
+            stats["candidate_pool_total"] / calls if calls else 0.0
+        )
+        stats["mean_backend_time_ms"] = (
+            stats["total_backend_time_ms"] / calls if calls else 0.0
+        )
+        return stats
 
 
 def random_euclidean_instance(n: int, seed: int = 42) -> DistanceMatrix:

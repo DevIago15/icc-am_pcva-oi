@@ -1,7 +1,13 @@
 import time
+import random
 from pathlib import Path
 import pandas as pd
-from am_pcva_oi_base import AMPCVAOI, AMPCVAOIConfig, random_euclidean_instance
+from am_pcva_oi_base import (
+    AMPCVAOI,
+    AMPCVAOIConfig,
+    ExploratoryLocalSearchPolicy,
+    random_euclidean_instance,
+)
 
 # =========================
 # CONFIGURAÇÃO
@@ -58,7 +64,8 @@ for n in sizes:
                 seed=solver_seed,
             )
 
-            solver = AMPCVAOI(dist, config=config, collect_decisions=True)
+            policy = ExploratoryLocalSearchPolicy(random.Random(solver_seed))
+            solver = AMPCVAOI(dist, config=config, policy=policy, collect_decisions=True)
             solver.run()
 
             run_records = 0

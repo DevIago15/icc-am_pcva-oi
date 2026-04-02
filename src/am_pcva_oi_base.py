@@ -4,10 +4,10 @@ import csv
 import math
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean, pstdev
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 try:
     import tsplib95  # type: ignore
@@ -57,7 +57,7 @@ class AMPCVAOIConfig:
     elite_size: int = 1
     seed: int = 42
     nearest_neighbor_seeds: int = 3
-    local_search_mode: str = "2opt"  # use "none" if you want pure GA steps only
+    local_search_mode: str = "2opt"
     local_search_on_children: bool = True
     two_opt_first_improvement: bool = True
     two_opt_max_passes: int = 20
@@ -99,38 +99,46 @@ class DistanceMatrix:
 
 
 class LocalSearchPolicy:
-    """Policy hook prepared for XGBoost/LightGBM.
-
-    Return True when local search should be applied to a child.
-    """
-
     def should_apply(self, features: dict) -> bool:
         raise NotImplementedError
 
 
 class ExploratoryLocalSearchPolicy(LocalSearchPolicy):
-
     def __init__(self, rng: random.Random):
         self.rng = rng
 
     def should_apply(self, features: dict) -> bool:
-
         rank = int(features["individual_rank"])
         gap = float(features["relative_gap_to_best"])
         stagnation = int(features["stagnation"])
 
-        prob = 0.30
+        force_apply = False
 
-        # soluções com gap moderado costumam melhorar
+        if 2 <= rank <= 8:
+            force_apply = True
+        elif gap > 0.10:
+            force_apply = True
+        elif stagnation >= 2:
+            force_apply = True
+        elif self.rng.random() < 0.35:
+            force_apply = True
+
+        if rank == 1 and self.rng.random() > 0.30:
+            force_apply = False
+
+        if not force_apply:
+            return False
+
+        if self.rng.random() > 0.85:
+            return True
+
+        prob = 0.30
         if 0.01 < gap < 0.20:
             prob += 0.25
-
-        # indivíduos estagnados também podem melhorar
         if stagnation >= 2:
             prob += 0.15
 
         prob = max(0.10, min(0.90, prob))
-
         return self.rng.random() < prob
 
 
@@ -144,22 +152,6 @@ class ThresholdPolicy(LocalSearchPolicy):
 
 
 class AMPCVAOI:
-    """Best-effort reconstruction scaffold inspired by AM_PCVA-OI.
-
-    Faithful parts:
-    - permutation representation
-    - OX1 crossover
-    - ISM mutation
-    - memetic GA structure
-    - population size configurable (10 by default)
-
-    Important note:
-    The thesis reports LK-based local refinement. A full Lin-Kernighan implementation is
-    non-trivial and not fully specified in the dissertation text alone. For a reliable base
-    implementation, this scaffold uses 2-opt by default and leaves a clean hook for replacing
-    it with a true LK implementation later.
-    """
-
     def __init__(
         self,
         dist: DistanceMatrix,
@@ -170,11 +162,10 @@ class AMPCVAOI:
         self.dist = dist
         self.cfg = config or AMPCVAOIConfig()
         self.rng = random.Random(self.cfg.seed)
-        self.policy = policy or ExploratoryLocalSearchPolicy(self.rng)
+        self.policy = policy
         self.collect_decisions = collect_decisions
         self.decision_records: List[DecisionRecord] = []
 
-    # ------------------------- public API -------------------------
     def run(self) -> Individual:
         population = self._initialize_population()
         population.sort(key=lambda ind: ind.cost)
@@ -210,7 +201,7 @@ class AMPCVAOI:
                 child_age = max(parent1.age, parent2.age) + 1
                 child_stagnation = min(
                     parent1.generations_without_improvement,
-                    parent2.generations_without_improvement
+                    parent2.generations_without_improvement,
                 ) + 1
 
                 child1 = Individual(
@@ -260,7 +251,6 @@ class AMPCVAOI:
             for rec in self.decision_records:
                 writer.writerow([getattr(rec, k) for k in DecisionRecord.__annotations__.keys()])
 
-    # ------------------------- initialization -------------------------
     def _initialize_population(self) -> List[Individual]:
         n = self.dist.n
         seeds = min(self.cfg.nearest_neighbor_seeds, self.cfg.population_size)
@@ -284,8 +274,8 @@ class AMPCVAOI:
             used_signatures.add(signature)
             population.append(Individual(tour=tour, cost=self.dist.tour_cost(tour)))
 
-            if self.cfg.local_search_mode != "none" and not self.collect_decisions:
-                population = [self._apply_local_search(ind) for ind in population]
+        if self.cfg.local_search_mode != "none" and not self.collect_decisions:
+            population = [self._apply_local_search(ind) for ind in population]
 
         return sorted(population, key=lambda ind: ind.cost)
 
@@ -303,7 +293,6 @@ class AMPCVAOI:
             current = nxt
         return tour
 
-    # ------------------------- GA operators -------------------------
     def _tournament_selection(self, population: Sequence[Individual]) -> Individual:
         contestants = self.rng.sample(list(population), k=min(self.cfg.tournament_size, len(population)))
         return min(contestants, key=lambda ind: ind.cost)
@@ -335,7 +324,6 @@ class AMPCVAOI:
         mutated.insert(j, node)
         return mutated
 
-    # ------------------------- local search -------------------------
     def _maybe_apply_local_search(
         self,
         individual: Individual,
@@ -344,64 +332,16 @@ class AMPCVAOI:
     ) -> Individual:
         features = self._extract_features(individual, population, generation)
 
-        rank = int(features["individual_rank"])
-        gap = float(features["relative_gap_to_best"])
-        stagnation = int(features["stagnation"])
-
-        # evita ruído inicial muito instável
         if generation < 2:
             return individual
 
-        # -------------------------
-        # FASE 1: FORÇAR DIVERSIDADE
-        # -------------------------
-        force_apply = False
-
-        # 1. indivíduos médios (melhor zona de aprendizado)
-        if 2 <= rank <= 8:
-            force_apply = True
-
-        # 2. indivíduos piores (alta chance de melhora)
-        elif gap > 0.10:
-            force_apply = True
-
-        # 3. indivíduos estagnados
-        elif stagnation >= 2:
-            force_apply = True
-
-        # 4. exploração aleatória mais agressiva
-        elif self.rng.random() < 0.35:
-            force_apply = True
-
-        # evita excesso de elite
-        if rank == 1 and self.rng.random() > 0.30:
-            force_apply = False
-
-        if not force_apply:
-            if self.collect_decisions:
-                self._record_decision(features, 0, 0, 0.0, 0.0)
-            return individual
-
-        # -------------------------
-        # FASE 2: POLICY (suavizada)
-        # -------------------------
-        # deixa a policy menos restritiva para gerar mais positivos
-        if self.policy:
-            if self.rng.random() > 0.85:  # bypass parcial da policy
-                should_apply = True
-            else:
-                should_apply = self.policy.should_apply(features)
-        else:
-            should_apply = True
+        should_apply = True if self.policy is None else self.policy.should_apply(features)
 
         if not should_apply:
             if self.collect_decisions:
                 self._record_decision(features, 0, 0, 0.0, 0.0)
             return individual
 
-        # -------------------------
-        # FASE 3: EXECUÇÃO REAL
-        # -------------------------
         before = individual.cost
         t0 = time.perf_counter()
         improved_ind = self._apply_local_search(individual)
@@ -415,7 +355,7 @@ class AMPCVAOI:
         if improved:
             improved_ind.generations_without_improvement = 0
         else:
-            improved_ind.generations_without_improvement = stagnation + 1
+            improved_ind.generations_without_improvement = individual.generations_without_improvement + 1
 
         return improved_ind
 
@@ -450,6 +390,7 @@ class AMPCVAOI:
                             break
                 if improved and self.cfg.two_opt_first_improvement:
                     break
+
         return Individual(
             tour=best_tour,
             cost=best_cost,
@@ -457,7 +398,6 @@ class AMPCVAOI:
             age=individual.age,
         )
 
-    # ------------------------- features / logs -------------------------
     def _extract_features(
         self,
         individual: Individual,
@@ -471,7 +411,10 @@ class AMPCVAOI:
         std_cost = pstdev(costs) if len(costs) > 1 else 0.0
         rank = 1 + sum(1 for c in costs if c < individual.cost)
         unique_edges_ratio = self._unique_edges_ratio(individual.tour, [ind.tour for ind in population])
-        edge_costs = [self.dist.d(individual.tour[k], individual.tour[(k + 1) % len(individual.tour)]) for k in range(len(individual.tour))]
+        edge_costs = [
+            self.dist.d(individual.tour[k], individual.tour[(k + 1) % len(individual.tour)])
+            for k in range(len(individual.tour))
+        ]
         denom = (worst_cost - best_cost) if worst_cost > best_cost else 1.0
 
         return {
@@ -489,6 +432,7 @@ class AMPCVAOI:
             "unique_edges_ratio": unique_edges_ratio,
             "mean_edge_cost": mean(edge_costs),
             "max_edge_cost": max(edge_costs),
+            "instance_size": self.dist.n,
         }
 
     def _record_decision(self, features: dict, applied: int, improved: int, delta_cost: float, elapsed_ms: float) -> None:
@@ -553,6 +497,7 @@ def random_euclidean_instance(n: int, seed: int = 42) -> DistanceMatrix:
 
 
 def main() -> None:
+    project_root = Path(__file__).resolve().parents[1]
     dist = random_euclidean_instance(n=30, seed=7)
     config = AMPCVAOIConfig(
         population_size=10,
@@ -561,12 +506,15 @@ def main() -> None:
         local_search_mode="2opt",
         seed=7,
     )
-    solver = AMPCVAOI(dist, config=config, collect_decisions=True)
+
+    policy = ExploratoryLocalSearchPolicy(random.Random(config.seed))
+    solver = AMPCVAOI(dist, config=config, policy=policy, collect_decisions=True)
     best = solver.run()
+
     print("[DEBUG] Melhor custo | Best cost:", round(best.cost, 6))
     print("[DEBUG] Melhor tour | Best tour:", best.tour)
-    solver.export_decision_dataset("data/decision_dataset.csv")
-    print("[INFO] Dataset de decisão salvo em decision_dataset.csv | Decision dataset saved to decision_dataset.csv")
+    solver.export_decision_dataset(project_root / "data" / "decision_dataset.csv")
+    print("[INFO] Dataset de decisao salvo em data/decision_dataset.csv")
 
 
 if __name__ == "__main__":

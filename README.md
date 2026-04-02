@@ -1,291 +1,194 @@
-# 🧠 AM-PCVA-OI + Machine Learning para PCV
+# AM-PCVA-OI + Machine Learning para PCV
 
-Projeto experimental de **Algoritmo Memético** para o **Problema do Caixeiro Viajante (PCV / TSP)** com integração de **Machine Learning** para aprender **quando aplicar busca local** de forma mais inteligente.
+Projeto experimental de Algoritmo Memetico para o Problema do Caixeiro Viajante (PCV / TSP), com uma trilha complementar de Machine Learning para decidir quando aplicar busca local.
 
-Hoje o foco do repositório está em duas frentes:
+O estado atual do projeto e o benchmark mais recente indicam que a base sem ML deve ser mantida como referencia principal. As policies com XGBoost e LightGBM continuam no repositorio como linha experimental, mas nao como nova base do solver.
 
-- ⚙️ construção e refinamento do algoritmo memético
-- 🤖 treinamento de modelos de ML para decisão de busca local
+## Visao geral
 
-Essa é apenas a ponta do iceberg. A ideia futura é conectar **módulos quânticos** para melhorar a execução do algoritmo, mas essa etapa **ainda não está pronta**. O projeto está atualmente na fase de **criação do algoritmo e da camada de ML**.
+O projeto implementa:
 
----
-
-## ✨ Visão geral
-
-O projeto implementa uma base inspirada no **AM-PCVA-OI** com:
-
-- representação por permutação
-- cruzamento `OX1`
-- mutação `ISM`
+- representacao por permutacao
+- crossover `OX1`
+- mutacao `ISM`
 - busca local `2-opt`
-- coleta de decisões durante a execução
-- políticas de decisão baseadas em `XGBoost` e `LightGBM`
+- coleta de decisoes durante a execucao
+- treino de policies com `XGBoost` e `LightGBM`
+- benchmark comparativo entre solver base e variantes com ML
 
-A pergunta central é:
+A pergunta central do trabalho foi:
 
-> **um modelo supervisionado consegue aprender quando vale a pena aplicar busca local em um algoritmo memético?**
+> um modelo supervisionado consegue aprender quando vale a pena aplicar busca local em um algoritmo memetico?
 
----
+## Decisao atual do projeto
 
-## 🧪 Pipeline real do projeto
+A escolha atual do projeto e seguir com o solver base, sem ML, como implementacao principal.
 
-O fluxo atual acontece em duas etapas de dataset:
+Motivos:
 
-```text
-1. Executar o AM-PCVA-OI base
-   ↓
-2. Gerar um dataset simples inicial
-   ↓
-3. Expandir/melhorar esse dataset com múltiplas execuções
-   ↓
-4. Validar os dados
-   ↓
-5. Treinar XGBoost e LightGBM
-   ↓
-6. Usar os modelos como políticas de busca local
-   ↓
-7. Comparar base vs XGBoost vs LightGBM
-```
+- no benchmark corrigido e justo, o `am_pcva_oi_base` obteve o melhor custo medio final
+- as policies com ML reduziram chamadas de busca local, mas nao melhoraram o custo final
+- as variantes `improved` ficaram piores em custo e tambem mais lentas que o baseline
+- as variantes `efficiency` reduziram tempo, mas perderam qualidade demais
+- antes da etapa com modulo quantico, faz mais sentido consolidar uma unica base classica confiavel
 
-Em termos práticos:
+Em outras palavras: o ML foi util como investigacao cientifica, mas nao se mostrou vantajoso o suficiente para substituir a base classica.
 
-- `src/am_pcva_oi_base.py` gera um **dataset simples inicial**
-- `src/generate_dataset.py` gera a versão **mais robusta/completa** do dataset para treino
+## Resultado do benchmark corrigido
 
----
+O benchmark mais recente foi executado apos consolidar o solver em um nucleo unico compartilhado. Isso eliminou a assimetria anterior na inicializacao da populacao e tornou a comparacao entre abordagens estruturalmente justa.
 
-## 📁 Estrutura do projeto
+Resumo agregado:
+
+| Abordagem | Runs | Mean best cost | Mean runtime (s) | Mean LS calls total | Mean LS calls main loop | Mean LS activation rate |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `am_pcva_oi_base` | 200 | 5.607753 | 7.179107 | 1040.800 | 1030.800 | 1.000000 |
+| `am_pcva_oi_lightgbm` | 200 | 5.627831 | 7.933481 | 100.855 | 90.855 | 0.091065 |
+| `am_pcva_oi_xgboost` | 200 | 5.633813 | 8.476708 | 94.530 | 84.530 | 0.082710 |
+| `am_pcva_oi_xgboost_efficiency` | 200 | 5.733702 | 5.620585 | 58.955 | 48.955 | 0.051401 |
+| `am_pcva_oi_lightgbm_efficiency` | 200 | 5.734233 | 4.933695 | 60.895 | 50.895 | 0.052631 |
+
+Leitura objetiva:
+
+- `base` foi o melhor em custo medio final
+- `lightgbm` e `xgboost` cortaram muitas chamadas de busca local, mas ficaram piores em custo e ainda mais lentos que o baseline
+- `xgboost_efficiency` e `lightgbm_efficiency` reduziram runtime, mas perderam qualidade de solucao de forma relevante
+
+Conclusao experimental:
+
+- se o foco principal for qualidade da solucao, o baseline e a melhor escolha
+- se o foco for reduzir tempo, a trilha `efficiency` ainda nao compensa a perda de qualidade
+- portanto, a linha principal do projeto permanece sendo o solver base sem ML
+
+## Estrutura atual
 
 ```text
 pcv_memetic_ml/
-├── artifacts/
-│   ├── lightgbm_feature_columns.json
-│   ├── lightgbm_feature_importance.csv
-│   ├── lightgbm_improved_model.joblib
-│   ├── lightgbm_metrics.json
-│   ├── lightgbm_pr_curve.png
-│   ├── xgboost_feature_columns.json
-│   ├── xgboost_feature_importance.csv
-│   ├── xgboost_improved_model.joblib
-│   ├── xgboost_metrics.json
-│   └── xgboost_pr_curve.png
-├── data/
-│   ├── decision_dataset.csv
-│   └── decision_dataset_full.csv
-├── notebooks/
-├── src/
-│   ├── am_pcva_oi_base.py
-│   ├── am_pcva_oi_lightgbm.py
-│   ├── am_pcva_oi_xgboost.py
-│   ├── benchmark_policies.py
-│   ├── generate_dataset.py
-│   ├── train_lightgbm.py
-│   ├── train_xgboost.py
-│   └── valid_decision_dataset.py
-├── requirements.txt
-└── README.md
+|-- artifacts/
+|   |-- benchmark_results_detailed.csv
+|   |-- benchmark_results_summary.csv
+|   |-- efficiency_target_summary.json
+|   |-- lightgbm_feature_columns.json
+|   |-- lightgbm_improved_model.joblib
+|   |-- lightgbm_metrics.json
+|   |-- lightgbm_efficiency_feature_columns.json
+|   |-- lightgbm_efficiency_model.joblib
+|   |-- lightgbm_efficiency_metrics.json
+|   |-- xgboost_feature_columns.json
+|   |-- xgboost_improved_model.joblib
+|   |-- xgboost_metrics.json
+|   |-- xgboost_efficiency_feature_columns.json
+|   |-- xgboost_efficiency_model.joblib
+|   |-- xgboost_efficiency_metrics.json
+|-- data/
+|   |-- decision_dataset.csv
+|   |-- decision_dataset_full.csv
+|   |-- decision_dataset_efficiency.csv
+|-- src/
+|   |-- am_pcva_oi_base.py
+|   |-- am_pcva_oi_lightgbm.py
+|   |-- am_pcva_oi_lightgbm_efficiency.py
+|   |-- am_pcva_oi_xgboost.py
+|   |-- am_pcva_oi_xgboost_efficiency.py
+|   |-- benchmark_policies.py
+|   |-- generate_dataset.py
+|   |-- prepare_efficiency_dataset.py
+|   |-- train_lightgbm.py
+|   |-- train_lightgbm_efficiency.py
+|   |-- train_xgboost.py
+|   |-- train_xgboost_efficiency.py
+|   |-- valid_decision_dataset.py
+|-- requirements.txt
+`-- README.md
 ```
 
----
+## Arquitetura atual
 
-## 🚀 Como executar
+Hoje existe uma base unica para o solver:
 
-### 1. Criar e ativar ambiente virtual
+- [src/am_pcva_oi_base.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_base.py)
 
-#### Windows
+Esse arquivo concentra:
 
-```powershell
-python -m venv venv
-venv\Scripts\activate
-```
+- o nucleo do algoritmo memetico
+- a inicializacao da populacao
+- os operadores geneticos
+- a busca local
+- a coleta de decisoes
+- as policies genericas
 
-#### Linux / macOS
+Os arquivos abaixo sao apenas wrappers de policy sobre o mesmo nucleo:
 
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
+- [src/am_pcva_oi_xgboost.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_xgboost.py)
+- [src/am_pcva_oi_lightgbm.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_lightgbm.py)
+- [src/am_pcva_oi_xgboost_efficiency.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_xgboost_efficiency.py)
+- [src/am_pcva_oi_lightgbm_efficiency.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_lightgbm_efficiency.py)
 
-### 2. Instalar dependências
+Isso foi feito para evitar drift entre implementacoes e preparar o projeto para a futura extensao com modulo quantico.
 
-```bash
-pip install -r requirements.txt
-```
+## Pipeline experimental
 
-### 3. Gerar o dataset simples inicial
-
-Esse passo usa o solver base e salva um dataset menor, útil como ponto de partida.
-
-```bash
-python src/am_pcva_oi_base.py
-```
-
-Saída esperada:
+Fluxo atual:
 
 ```text
-data/decision_dataset.csv
+1. Executar o solver base com coleta de decisoes
+   ->
+2. Gerar dataset completo
+   ->
+3. Validar dataset
+   ->
+4. Treinar models para target improved
+   ->
+5. Gerar dataset derivado por efficiency
+   ->
+6. Treinar models para target efficiency
+   ->
+7. Rodar benchmark comparativo
+   ->
+8. Decidir qual abordagem deve seguir como base
 ```
 
-### 4. Gerar o dataset completo
+## Datasets e targets
 
-Depois do dataset inicial, você expande a base com múltiplas instâncias e múltiplas seeds:
+### Dataset principal
 
-```bash
-python src/generate_dataset.py
-```
+Gerado por:
 
-Saída esperada:
+- `python src/am_pcva_oi_base.py`
+- `python src/generate_dataset.py`
 
-```text
-data/decision_dataset_full.csv
-```
+Arquivos:
 
-### 5. Validar o dataset
+- `data/decision_dataset.csv`
+- `data/decision_dataset_full.csv`
 
-```bash
-python src/valid_decision_dataset.py
-```
+### Target original
 
-### 6. Treinar os modelos
+`improved`
 
-```bash
-python src/train_xgboost.py
-python src/train_lightgbm.py
-```
+Interpretacao:
 
-### 7. Rodar o benchmark
+- `1`: a busca local melhorou a solucao
+- `0`: a busca local nao melhorou a solucao
 
-```bash
-python src/benchmark_policies.py
-```
+### Dataset derivado por eficiencia
 
----
+Gerado por:
 
-## 🧭 O que cada script faz
+- `python src/prepare_efficiency_dataset.py`
 
-### `src/am_pcva_oi_base.py`
+Arquivo:
 
-É a base do algoritmo memético e também o primeiro passo de geração de dados.
+- `data/decision_dataset_efficiency.csv`
 
-Quando executado diretamente, ele:
+Esse dataset adiciona:
 
-- cria uma instância euclidiana do PCV
-- roda o algoritmo base
-- coleta decisões de busca local
-- exporta um dataset simples inicial
+- `efficiency = delta_cost / local_search_time_ms`
+- `target_efficiency = 1` apenas quando houve melhora real e a eficiencia ficou acima do limiar definido pela mediana da eficiencia entre os casos positivos
 
-Saída:
+## Features usadas pelos modelos
 
-```text
-data/decision_dataset.csv
-```
-
-### `src/generate_dataset.py`
-
-É a etapa de **expansão/melhoria do dataset**.
-
-Ele executa múltiplas combinações de:
-
-- tamanhos de instância
-- seeds da instância
-- seeds do solver
-
-Objetivo:
-
-- sair de um dataset simples inicial
-- gerar uma base mais robusta para treino supervisionado
-
-Saída:
-
-```text
-data/decision_dataset_full.csv
-```
-
-Configuração atual:
-
-- tamanhos de instância: `30, 40, 50, 60`
-- seeds de instância: `1..20`
-- seeds do solver: `1..5`
-
-### `src/valid_decision_dataset.py`
-
-Faz uma checagem exploratória da base:
-
-- tipos e estatísticas
-- valores nulos
-- infinitos
-- duplicados
-- distribuição de `improved`
-- correlação entre colunas numéricas
-
-### `src/train_xgboost.py`
-
-Treina um classificador `XGBoost` para prever `improved`.
-
-Artefatos gerados:
-
-- `artifacts/xgboost_improved_model.joblib`
-- `artifacts/xgboost_feature_columns.json`
-- `artifacts/xgboost_metrics.json`
-- `artifacts/xgboost_feature_importance.csv`
-- `artifacts/xgboost_pr_curve.png`
-
-### `src/train_lightgbm.py`
-
-Treina um classificador `LightGBM` com a mesma lógica experimental.
-
-Artefatos gerados:
-
-- `artifacts/lightgbm_improved_model.joblib`
-- `artifacts/lightgbm_feature_columns.json`
-- `artifacts/lightgbm_metrics.json`
-- `artifacts/lightgbm_feature_importance.csv`
-- `artifacts/lightgbm_pr_curve.png`
-
-### `src/am_pcva_oi_xgboost.py`
-
-Executa o algoritmo usando uma policy baseada no modelo `XGBoost`.
-
-### `src/am_pcva_oi_lightgbm.py`
-
-Executa o algoritmo usando uma policy baseada no modelo `LightGBM`.
-
-### `src/benchmark_policies.py`
-
-Compara três abordagens:
-
-- `am_pcva_oi_base`
-- `am_pcva_oi_xgboost`
-- `am_pcva_oi_lightgbm`
-
-Saídas:
-
-- `artifacts/benchmark_results_detailed.csv`
-- `artifacts/benchmark_results_summary.csv`
-
----
-
-## 🎯 Variável alvo
-
-A variável alvo do modelo é:
-
-```text
-improved
-```
-
-Interpretação:
-
-- `improved = 1` → a busca local melhorou a solução
-- `improved = 0` → a busca local não trouxe ganho
-
-Isso transforma a decisão de aplicar busca local em um problema de **classificação binária**.
-
----
-
-## 🧩 Features usadas pelos modelos
-
-As policies aprendem a partir de sinais extraídos do estado do algoritmo:
+As policies aprendem a partir destas features:
 
 ```text
 generation
@@ -305,7 +208,7 @@ max_edge_cost
 instance_size
 ```
 
-Colunas removidas no treino por vazamento ou identidade experimental:
+Colunas removidas do treino por vazamento ou identidade experimental:
 
 - `delta_cost`
 - `local_search_time_ms`
@@ -313,173 +216,176 @@ Colunas removidas no treino por vazamento ou identidade experimental:
 - `instance_seed`
 - `solver_seed`
 
----
+Na trilha de eficiencia, tambem sao removidas:
 
-## 🧠 Exemplo com o solver base
+- `efficiency`
+- `improved`
 
-```python
-from src.am_pcva_oi_base import AMPCVAOI, AMPCVAOIConfig, random_euclidean_instance
+## Como executar
 
-dist = random_euclidean_instance(n=50, seed=7)
+### 1. Criar e ativar ambiente virtual
 
-config = AMPCVAOIConfig(
-    population_size=10,
-    generations=200,
-    mutation_rate=0.08,
-    local_search_mode="2opt",
-    seed=7,
-)
+Windows:
 
-solver = AMPCVAOI(
-    dist=dist,
-    config=config,
-    collect_decisions=True,
-)
-
-best = solver.run()
-
-print(best.cost)
-print(best.tour)
-solver.export_decision_dataset("data/decision_dataset.csv")
+```powershell
+python -m venv venv
+venv\Scripts\activate
 ```
 
----
+Linux / macOS:
 
-## 🌲 Exemplo com policy XGBoost
-
-```python
-from src.am_pcva_oi_xgboost import (
-    AMPCVAOI,
-    AMPCVAOIConfig,
-    XGBoostLocalSearchPolicy,
-    random_euclidean_instance,
-)
-
-dist = random_euclidean_instance(n=50, seed=7)
-
-policy = XGBoostLocalSearchPolicy(
-    model_path="artifacts/xgboost_improved_model.joblib",
-    features_path="artifacts/xgboost_feature_columns.json",
-    threshold=0.80,
-)
-
-solver = AMPCVAOI(
-    dist=dist,
-    config=AMPCVAOIConfig(seed=7, generations=200),
-    policy=policy,
-    collect_decisions=False,
-)
-
-best = solver.run()
-print(best.cost)
+```bash
+python3 -m venv venv
+source venv/bin/activate
 ```
 
----
-
-## 💡 Exemplo com policy LightGBM
-
-```python
-from src.am_pcva_oi_lightgbm import (
-    AMPCVAOI,
-    AMPCVAOIConfig,
-    LightGBMLocalSearchPolicy,
-    random_euclidean_instance,
-)
-
-dist = random_euclidean_instance(n=50, seed=7)
-
-policy = LightGBMLocalSearchPolicy(
-    model_path="artifacts/lightgbm_improved_model.joblib",
-    features_path="artifacts/lightgbm_feature_columns.json",
-    threshold=0.75,
-)
-
-solver = AMPCVAOI(
-    dist=dist,
-    config=AMPCVAOIConfig(seed=7, generations=200),
-    policy=policy,
-)
-
-best = solver.run()
-print(best.cost)
-```
-
----
-
-## 📊 O que o benchmark mede
-
-Ao final do pipeline, você consegue comparar:
-
-- qualidade da solução final (`best_cost`)
-- tempo de execução (`runtime_seconds`)
-- impacto das políticas aprendidas
-- relação entre custo computacional e ganho de qualidade
-
-Na prática, o benchmark testa se o ML consegue:
-
-- reduzir aplicações desnecessárias de busca local
-- manter ou melhorar a qualidade das soluções
-- tornar a execução mais eficiente
-
----
-
-## 🛠️ Dependências principais
-
-O projeto usa principalmente:
-
-- `numpy`
-- `pandas`
-- `matplotlib`
-- `seaborn`
-- `scikit-learn`
-- `xgboost`
-- `lightgbm`
-- `tsplib95`
-- `tqdm`
-
-Instalação:
+### 2. Instalar dependencias
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+### 3. Gerar dataset base
 
-## 📌 Estado atual do projeto
+```bash
+python src/am_pcva_oi_base.py
+python src/generate_dataset.py
+```
 
-Neste momento, o projeto está concentrado em:
+### 4. Validar dataset
 
-- projetar e estabilizar o algoritmo memético
-- criar um dataset de decisão confiável
-- treinar e validar modelos de ML
-- comparar políticas aprendidas contra a abordagem base
+```bash
+python src/valid_decision_dataset.py
+```
 
-Ainda **não** faz parte da implementação atual:
+### 5. Treinar modelos da trilha `improved`
 
-- integração com módulos quânticos
-- aceleração quântica do solver
-- pipeline híbrido clássico-quântico final
+```bash
+python src/train_xgboost.py
+python src/train_lightgbm.py
+```
 
-Esses pontos fazem parte da visão futura do projeto.
+### 6. Gerar e treinar trilha `efficiency`
 
----
+```bash
+python src/prepare_efficiency_dataset.py
+python src/train_xgboost_efficiency.py
+python src/train_lightgbm_efficiency.py
+```
 
-## 🔭 Próximos passos
+### 7. Rodar benchmark
 
-- refinar ainda mais a geração do dataset
-- testar novas features e políticas de decisão
-- adicionar novas heurísticas de comparação
-- testar instâncias reais da TSPLIB
-- incluir módulos quânticos quando a base clássica estiver madura
+```bash
+python src/benchmark_policies.py
+```
 
----
+## O que cada script faz
 
-## 👨‍🔬 Contexto
+### `src/am_pcva_oi_base.py`
 
-Este projeto foi desenvolvido no contexto de **Iniciação Científica**, conectando:
+Nucleo compartilhado do solver. Quando executado diretamente, gera um dataset inicial de decisoes usando policy exploratoria.
 
-- metaheurísticas evolutivas
-- otimização combinatória
+### `src/generate_dataset.py`
+
+Expande a coleta para multiplas instancias e multiplas seeds, produzindo a base consolidada para treino.
+
+### `src/prepare_efficiency_dataset.py`
+
+Deriva o dataset da trilha de eficiencia a partir do dataset consolidado.
+
+### `src/train_xgboost.py`
+
+Treina XGBoost para o target `improved`.
+
+### `src/train_lightgbm.py`
+
+Treina LightGBM para o target `improved`.
+
+### `src/train_xgboost_efficiency.py`
+
+Treina XGBoost para o target `target_efficiency`.
+
+### `src/train_lightgbm_efficiency.py`
+
+Treina LightGBM para o target `target_efficiency`.
+
+### `src/am_pcva_oi_xgboost.py`
+
+Executa o solver base com policy aprendida por XGBoost.
+
+### `src/am_pcva_oi_lightgbm.py`
+
+Executa o solver base com policy aprendida por LightGBM.
+
+### `src/am_pcva_oi_xgboost_efficiency.py`
+
+Executa o solver base com policy de eficiencia aprendida por XGBoost.
+
+### `src/am_pcva_oi_lightgbm_efficiency.py`
+
+Executa o solver base com policy de eficiencia aprendida por LightGBM.
+
+### `src/benchmark_policies.py`
+
+Executa benchmark comparativo entre:
+
+- `am_pcva_oi_base`
+- `am_pcva_oi_xgboost`
+- `am_pcva_oi_lightgbm`
+- `am_pcva_oi_xgboost_efficiency`
+- `am_pcva_oi_lightgbm_efficiency`
+
+E registra, alem de custo e tempo:
+
+- numero de oportunidades de busca local
+- numero de chamadas reais de busca local
+- chamadas na inicializacao
+- chamadas no loop principal
+- taxa de ativacao de busca local
+- total de melhorias obtidas por busca local
+- tempo total gasto em busca local
+
+## Escolha da base sem ML
+
+A escolha atual do projeto e seguir com o solver base sem ML por tres razoes centrais:
+
+1. Ele foi a melhor abordagem em qualidade de solucao no benchmark corrigido.
+2. Ele evita o overhead de inferencia dos modelos.
+3. Ele fornece uma base classica unica, limpa e estavel para a futura integracao com o modulo quantico.
+
+Isso significa que:
+
+- o solver base e a referencia principal do projeto
+- as policies de ML permanecem como trilha secundaria de pesquisa
+- qualquer futura extensao quantica deve partir do nucleo compartilhado em `src/am_pcva_oi_base.py`
+
+## Estado atual do projeto
+
+Neste momento, o projeto esta concentrado em:
+
+- consolidar a base classica do algoritmo memetico
+- manter a trilha de ML como linha experimental
+- preparar o codigo para uma proxima etapa com modulo quantico
+
+Ainda nao fazem parte da implementacao atual:
+
+- integracao com modulos quanticos
+- aceleracao quantica do solver
+- pipeline classico-quantico final
+
+## Proximos passos
+
+- manter o solver base como baseline oficial
+- usar a base compartilhada como ponto de extensao para o modulo quantico
+- testar instancias reais da TSPLIB
+- revisar se alguma policy de ML ainda pode ser aproveitada como heuristica auxiliar, sem substituir a base
+
+## Contexto
+
+Este projeto foi desenvolvido no contexto de Iniciacao Cientifica, conectando:
+
+- metaheuristicas evolutivas
+- otimizacao combinatoria
 - aprendizado supervisionado
-- políticas adaptativas de busca local
-- futura extensão para computação quântica
+- policies adaptativas de busca local
+- futura extensao para computacao quantica

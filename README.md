@@ -1,8 +1,12 @@
 # AM-PCVA-OI + Machine Learning para PCV
 
-Projeto experimental de Algoritmo Memetico para o Problema do Caixeiro Viajante (PCV / TSP), com uma trilha complementar de Machine Learning para decidir quando aplicar busca local.
+Projeto experimental de Algoritmo Memetico para o Problema do Caixeiro Viajante (PCV / TSP), com tres frentes conectadas:
 
-O estado atual do projeto e o benchmark mais recente indicam que a base sem ML deve ser mantida como referencia principal. As policies com XGBoost e LightGBM continuam no repositorio como linha experimental, mas nao como nova base do solver. A partir dessa base unica, o projeto agora tambem possui uma trilha hibrida com Grover, preparada para comparacoes futuras entre execucao classica e quantica.
+- uma base classica unica
+- uma trilha experimental com Machine Learning para decidir quando aplicar busca local
+- uma trilha hibrida com Grover para futura comparacao entre execucao classica e quantica
+
+No estado atual do projeto, a base sem ML permanece como referencia principal. As trilhas com ML e Grover existem como extensoes sobre o mesmo nucleo do solver.
 
 ## Visao geral
 
@@ -11,24 +15,28 @@ O projeto implementa:
 - representacao por permutacao
 - crossover `OX1`
 - mutacao `ISM`
-- busca local `2-opt`
+- busca local `2opt`
 - busca local hibrida `grover_2opt`
 - coleta de decisoes durante a execucao
 - treino de policies com `XGBoost` e `LightGBM`
 - benchmark comparativo entre solver base e variantes com ML
-- benchmark dedicado para comparar `2-opt` classico com a versao hibrida baseada em Grover
+- benchmark especifico para a trilha Grover
 
-A pergunta central do trabalho foi:
+Pergunta central da primeira etapa:
 
 > um modelo supervisionado consegue aprender quando vale a pena aplicar busca local em um algoritmo memetico?
 
+Pergunta central da etapa atual:
+
+> como estender a base classica do solver para uma versao hibrida com Grover, preservando uma unica implementacao de referencia e permitindo comparacao futura entre ambiente classico e quantico?
+
 ## Decisao atual do projeto
 
-A escolha atual do projeto e seguir com o solver base, sem ML, como implementacao principal.
+A escolha atual do projeto e manter o solver base, sem ML, como implementacao principal.
 
 Motivos:
 
-- no benchmark corrigido e justo, o `am_pcva_oi_base` obteve o melhor custo medio final
+- no benchmark corrigido e estruturalmente justo, o `am_pcva_oi_base` obteve o melhor custo medio final
 - as policies com ML reduziram chamadas de busca local, mas nao melhoraram o custo final
 - as variantes `improved` ficaram piores em custo e tambem mais lentas que o baseline
 - as variantes `efficiency` reduziram tempo, mas perderam qualidade demais
@@ -36,7 +44,7 @@ Motivos:
 
 Em outras palavras: o ML foi util como investigacao cientifica, mas nao se mostrou vantajoso o suficiente para substituir a base classica. Por isso, a extensao com Grover foi acoplada diretamente ao solver base, e nao a uma variante com ML.
 
-## Resultado do benchmark corrigido
+## Resultado do benchmark principal
 
 O benchmark mais recente foi executado apos consolidar o solver em um nucleo unico compartilhado. Isso eliminou a assimetria anterior na inicializacao da populacao e tornou a comparacao entre abordagens estruturalmente justa.
 
@@ -61,6 +69,90 @@ Conclusao experimental:
 - se o foco principal for qualidade da solucao, o baseline e a melhor escolha
 - se o foco for reduzir tempo, a trilha `efficiency` ainda nao compensa a perda de qualidade
 - portanto, a linha principal do projeto permanece sendo o solver base sem ML
+
+## Configuracao experimental atual
+
+As configuracoes abaixo refletem os tamanhos e parametros realmente usados no codigo atual.
+
+### Parametros comuns do solver
+
+- tamanho da populacao: `10`
+- numero maximo de geracoes: `200`
+- taxa de mutacao: `0.08`
+- representacao: permutacao
+- crossover: `OX1`
+- mutacao: `ISM`
+- busca local classica: `2opt`
+
+### Tamanhos de instancia atualmente testados
+
+Os "caminhos" ou tamanhos de problema TSP usados nos experimentos atuais sao:
+
+- `30` cidades
+- `40` cidades
+- `50` cidades
+- `60` cidades
+
+Ou seja, os datasets e benchmarks hoje trabalham com instancias pequenas e medias, sempre no intervalo de 30 a 60 cidades.
+
+### Coleta do dataset principal
+
+Configuracao atual de `src/generate_dataset.py`:
+
+- tamanhos de instancia: `30, 40, 50, 60`
+- seeds da instancia: `1..20`
+- seeds do solver: `1..5`
+- populacao: `10`
+- geracoes: `200`
+- busca local: `2opt`
+
+Total:
+
+- `4` tamanhos
+- `20` seeds de instancia por tamanho
+- `5` seeds do solver por instancia
+- `400` execucoes para gerar o dataset consolidado
+
+### Benchmark principal: base vs ML
+
+Configuracao atual de `src/benchmark_policies.py`:
+
+- abordagens:
+  - `am_pcva_oi_base`
+  - `am_pcva_oi_xgboost`
+  - `am_pcva_oi_lightgbm`
+  - `am_pcva_oi_xgboost_efficiency`
+  - `am_pcva_oi_lightgbm_efficiency`
+- tamanhos de instancia: `30, 40, 50, 60`
+- seeds da instancia: `1..10`
+- seeds do solver: `1..5`
+- populacao: `10`
+- geracoes: `200`
+- busca local base: `2opt`
+
+Total:
+
+- `50` execucoes por tamanho e por abordagem
+- `200` execucoes por abordagem
+
+### Benchmark da trilha Grover
+
+Configuracao atual de `src/benchmark_grover_backends.py`:
+
+- abordagens previstas:
+  - `am_pcva_oi_base_2opt`
+  - `am_pcva_oi_grover_classical`
+  - `am_pcva_oi_grover_qiskit_statevector` quando `qiskit` estiver disponivel
+- tamanhos de instancia: `30, 40, 50, 60`
+- seeds da instancia: `1..10`
+- seeds do solver: `1..5`
+- populacao: `10`
+- geracoes: `200`
+- modo hibrido: `grover_2opt`
+- pool de candidatos Grover: `64` movimentos `2opt`
+- shots do backend Grover: `1024`
+
+Na pratica, isso significa que a comparacao entre a base classica e a trilha Grover esta sendo preparada sobre o mesmo intervalo de tamanhos de problema ja usado no benchmark principal: 30 a 60 cidades.
 
 ## Estrutura atual
 
@@ -110,9 +202,7 @@ pcv_memetic_ml/
 
 ## Arquitetura atual
 
-Hoje existe uma base unica para o solver:
-
-- [src/am_pcva_oi_base.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_base.py)
+Hoje existe uma base unica para o solver em `src/am_pcva_oi_base.py`.
 
 Esse arquivo concentra:
 
@@ -125,25 +215,26 @@ Esse arquivo concentra:
 - as policies genericas
 - os backends de busca Grover
 
-Os arquivos abaixo sao apenas wrappers de policy sobre o mesmo nucleo:
+Os arquivos abaixo sao wrappers ou pontos de entrada sobre o mesmo nucleo:
 
-- [src/am_pcva_oi_xgboost.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_xgboost.py)
-- [src/am_pcva_oi_lightgbm.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_lightgbm.py)
-- [src/am_pcva_oi_xgboost_efficiency.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_xgboost_efficiency.py)
-- [src/am_pcva_oi_lightgbm_efficiency.py](/c:/Users/Lagoa/OneDrive/Área%20de%20Trabalho/pes/facul/icc/pcv_memetic_ml/src/am_pcva_oi_lightgbm_efficiency.py)
+- `src/am_pcva_oi_xgboost.py`
+- `src/am_pcva_oi_lightgbm.py`
+- `src/am_pcva_oi_xgboost_efficiency.py`
+- `src/am_pcva_oi_lightgbm_efficiency.py`
+- `src/am_pcva_oi_grover.py`
 
 Isso foi feito para evitar drift entre implementacoes e preparar o projeto para a futura extensao com modulo quantico.
 
 ## Trilha hibrida com Grover
 
-O projeto agora inclui uma extensao hibrida do solver base usando Grover como subrotina de busca sobre um conjunto de movimentos candidatos de `2-opt`.
+O projeto inclui uma extensao hibrida do solver base usando Grover como subrotina de busca sobre um conjunto de movimentos candidatos de `2opt`.
 
 Ideia geral:
 
 - o solver continua sendo o `AMPCVAOI` compartilhado
 - a busca local pode operar no modo tradicional `2opt`
 - ou no modo `grover_2opt`
-- no modo hibrido, o solver monta um pool de movimentos `2-opt` candidatos
+- no modo hibrido, o solver monta um pool de movimentos `2opt` candidatos
 - um backend Grover escolhe um movimento melhorante dentro desse pool
 
 Backends atualmente suportados:
@@ -180,7 +271,7 @@ Fluxo atual:
    ->
 6. Treinar models para target efficiency
    ->
-7. Rodar benchmark comparativo
+7. Rodar benchmark comparativo em instancias de 30, 40, 50 e 60 cidades
    ->
 8. Consolidar o solver base como linha principal
    ->
@@ -202,6 +293,14 @@ Arquivos:
 
 - `data/decision_dataset.csv`
 - `data/decision_dataset_full.csv`
+
+Escala experimental atual:
+
+- populacao: `10`
+- geracoes: `200`
+- tamanhos de instancia: `30, 40, 50, 60`
+- seeds da instancia: `1..20`
+- seeds do solver: `1..5`
 
 ### Target original
 
@@ -319,7 +418,7 @@ python src/train_xgboost_efficiency.py
 python src/train_lightgbm_efficiency.py
 ```
 
-### 7. Rodar benchmark
+### 7. Rodar benchmark principal
 
 ```bash
 python src/benchmark_policies.py
@@ -347,9 +446,25 @@ Nucleo compartilhado do solver. Quando executado diretamente, gera um dataset in
 
 Executa a versao hibrida do solver base com `local_search_mode="grover_2opt"`.
 
+Configuracao padrao atual:
+
+- tamanho da instancia no exemplo: `50`
+- populacao: `10`
+- geracoes: `200`
+- pool de candidatos Grover: `64`
+- shots: `1024`
+
 ### `src/generate_dataset.py`
 
 Expande a coleta para multiplas instancias e multiplas seeds, produzindo a base consolidada para treino.
+
+Escopo atual:
+
+- tamanhos: `30, 40, 50, 60`
+- populacao: `10`
+- geracoes: `200`
+- seeds de instancia: `1..20`
+- seeds do solver: `1..5`
 
 ### `src/prepare_efficiency_dataset.py`
 
@@ -407,6 +522,15 @@ E registra, alem de custo e tempo:
 - total de melhorias obtidas por busca local
 - tempo total gasto em busca local
 
+Escopo atual:
+
+- tamanhos: `30, 40, 50, 60`
+- populacao: `10`
+- geracoes: `200`
+- seeds de instancia: `1..10`
+- seeds do solver: `1..5`
+- `200` execucoes por abordagem
+
 ### `src/benchmark_grover_backends.py`
 
 Executa benchmark especifico entre:
@@ -423,6 +547,16 @@ E registra:
 - numero de sucessos do backend Grover
 - tamanho medio do pool de candidatos
 - tempo total e medio do backend Grover
+
+Escopo atual:
+
+- tamanhos: `30, 40, 50, 60`
+- populacao: `10`
+- geracoes: `200`
+- seeds de instancia: `1..10`
+- seeds do solver: `1..5`
+- pool Grover: `64`
+- shots: `1024`
 
 ## Escolha da base sem ML
 

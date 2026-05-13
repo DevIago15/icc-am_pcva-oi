@@ -4,7 +4,7 @@ Projeto experimental de Algoritmo Memetico para o Problema do Caixeiro Viajante 
 
 - uma base classica unica
 - uma trilha experimental com Machine Learning para decidir quando aplicar busca local
-- uma trilha hibrida com Grover para futura comparacao entre execucao classica e quantica
+- uma trilha hibrida com Grover, incluindo backends classicos, simulacao local com Qiskit e validacao no Azure Quantum
 
 No estado atual do projeto, a base sem ML permanece como referencia principal. As trilhas com ML e Grover existem como extensoes sobre o mesmo nucleo do solver.
 
@@ -21,6 +21,8 @@ O projeto implementa:
 - treino de policies com `XGBoost` e `LightGBM`
 - benchmark comparativo entre solver base e variantes com ML
 - benchmark especifico para a trilha Grover
+- runner isolado de Grover no Azure Quantum
+- benchmark multi-instancia para jobs de Grover no Azure Quantum
 
 Pergunta central da primeira etapa:
 
@@ -154,6 +156,15 @@ Configuracao atual de `src/benchmark_grover_backends.py`:
 
 Na pratica, isso significa que a comparacao entre a base classica e a trilha Grover esta sendo preparada sobre o mesmo intervalo de tamanhos de problema ja usado no benchmark principal: 30 a 60 cidades.
 
+### Validacao no Azure Quantum
+
+Alem da trilha local com `ClassicalGroverSearchBackend` e `QiskitGroverSearchBackend`, o repositorio inclui dois utilitarios para validacao no Azure Quantum:
+
+- `src/azure_quantum_grover_runner.py`: submete um circuito de Grover isolado para um target do workspace
+- `src/benchmark_azure_quantum_grover.py`: gera multiplos casos a partir do solver e mede a subrotina isolada no Azure
+
+Esses scripts nao substituem o benchmark local fim a fim do solver. Eles servem para validar a subrotina quantica sobre pools reais de movimentos `2opt`, usando o mesmo espaco de busca conceitual da trilha hibrida.
+
 ## Estrutura atual
 
 ```text
@@ -187,6 +198,9 @@ pcv_memetic_ml/
 |   |-- am_pcva_oi_lightgbm_efficiency.py
 |   |-- am_pcva_oi_xgboost.py
 |   |-- am_pcva_oi_xgboost_efficiency.py
+|   |-- article_benchmark_suite.py
+|   |-- azure_quantum_grover_runner.py
+|   |-- benchmark_azure_quantum_grover.py
 |   |-- benchmark_grover_backends.py
 |   |-- benchmark_policies.py
 |   |-- generate_dataset.py
@@ -436,6 +450,24 @@ python src/am_pcva_oi_grover.py
 python src/benchmark_grover_backends.py
 ```
 
+### 10. Listar targets no Azure Quantum
+
+```bash
+python src/azure_quantum_grover_runner.py --resource-id "<resource-id>" --tenant-id "<tenant-id>" --list-targets
+```
+
+### 11. Rodar um job isolado de Grover no Azure Quantum
+
+```bash
+python src/azure_quantum_grover_runner.py --resource-id "<resource-id>" --tenant-id "<tenant-id>" --target "rigetti.sim.qvm"
+```
+
+### 12. Rodar benchmark multi-instancia da subrotina no Azure Quantum
+
+```bash
+python src/benchmark_azure_quantum_grover.py --resource-id "<resource-id>" --tenant-id "<tenant-id>" --target "rigetti.sim.qvm"
+```
+
 ## O que cada script faz
 
 ### `src/am_pcva_oi_base.py`
@@ -558,6 +590,46 @@ Escopo atual:
 - pool Grover: `64`
 - shots: `1024`
 
+### `src/azure_quantum_grover_runner.py`
+
+Submete um circuito isolado de Grover para um workspace do Azure Quantum e imprime:
+
+- target usado
+- contagens medidas
+- estado dominante
+- indice dominante
+- validade do indice
+- indicacao se o indice dominante pertence ao conjunto de estados bons
+
+Parametros relevantes:
+
+- `--resource-id`
+- `--tenant-id`
+- `--target`
+- `--list-targets`
+- `--auth-debug` quando for necessario diagnosticar a credencial usada no Azure
+
+### `src/benchmark_azure_quantum_grover.py`
+
+Gera casos reais a partir do solver AM-PCVA-OI, extrai pools de movimentos `2opt` com melhora positiva e submete cada caso como um job isolado de Grover no Azure Quantum.
+
+Registra em CSV:
+
+- tamanho da instancia
+- seeds de instancia e do solver
+- rank do individuo analisado
+- tamanho do pool quantico
+- numero de indices bons
+- indice dominante retornado
+- taxa de acerto em solucao marcada
+- taxa de acerto no melhor movimento
+- tempo por job
+
+Saidas:
+
+- `artifacts/benchmark_azure_quantum_grover_detailed.csv`
+- `artifacts/benchmark_azure_quantum_grover_summary.csv`
+
 ## Escolha da base sem ML
 
 A escolha atual do projeto e seguir com o solver base sem ML por tres razoes centrais:
@@ -579,12 +651,14 @@ Neste momento, o projeto esta concentrado em:
 
 - consolidar a base classica do algoritmo memetico
 - manter a trilha de ML como linha experimental
-- preparar o codigo para uma proxima etapa com modulo quantico
+- manter a trilha Grover local como benchmark principal da linha hibrida
+- validar a subrotina isolada tambem no Azure Quantum
 - estruturar uma versao hibrida com Grover sobre a base classica
 
 Ainda nao fazem parte da implementacao atual:
 
 - execucao em hardware quantico real
+- integracao fim a fim do backend Azure dentro de cada chamada do solver memetico
 - avaliacao experimental completa entre backend classico e backend quantico real
 - pipeline classico-quantico final consolidado
 
@@ -594,7 +668,7 @@ Ainda nao fazem parte da implementacao atual:
 - usar a base compartilhada como ponto de extensao para o modulo quantico
 - amadurecer a trilha `grover_2opt`
 - instalar e validar o backend Qiskit no ambiente
-- comparar `grover_2opt` com backend classico versus backend quantico
+- comparar `grover_2opt` com backend classico, `qiskit_statevector` e resultados isolados no Azure Quantum
 - testar instancias reais da TSPLIB
 - revisar se alguma policy de ML ainda pode ser aproveitada como heuristica auxiliar, sem substituir a base
 
@@ -606,4 +680,4 @@ Este projeto foi desenvolvido no contexto de Iniciacao Cientifica, conectando:
 - otimizacao combinatoria
 - aprendizado supervisionado
 - policies adaptativas de busca local
-- futura extensao para computacao quantica
+- extensao experimental para computacao quantica
